@@ -9,6 +9,10 @@ The Kalman Filter operates in two steps:
 2. Update: Use sensor measurements to correct the prediction
 
 State: x = [x, y, vx, vy]^T  (position and velocity in 2D)
+
+In our robot:
+  - PREDICT runs on every odometry callback (~30 Hz) — fast, smooth, drifts
+  - UPDATE runs on every GPS callback (~1 Hz) — slow, noisy, no drift
 """
 
 import numpy as np
@@ -19,8 +23,8 @@ class LinearKalmanFilter:
     """
     Linear Kalman Filter for 2D robot localization.
 
-    This filter estimates the robot's position and velocity from noisy
-    odometry measurements.
+    Fuses fast odometry (predict) with slow GPS (update) to estimate
+    the robot's position and velocity.
 
     State vector: [x, y, vx, vy]
     - x, y: position in meters
@@ -28,32 +32,30 @@ class LinearKalmanFilter:
 
     Example usage:
         kf = LinearKalmanFilter(dt=0.1)
-
-        # Initialize with known position
         kf.initialize(x=0.0, y=0.0)
 
-        # In your control loop:
+        # On every odom callback (fast):
         kf.predict()
-        kf.update(measured_x, measured_y)
 
-        # Get the estimated state
+        # On every GPS callback (slow):
+        kf.update(gps_x, gps_y)
+
         x, y, vx, vy = kf.get_state()
-        covariance = kf.get_covariance()
     """
 
     def __init__(
         self,
         dt: float = 0.1,
         process_noise: float = 0.1,
-        measurement_noise: float = 0.5,
+        measurement_noise: float = 2.0,
     ):
         """
         Initialize the Kalman Filter.
 
         Args:
             dt: Time step in seconds
-            process_noise: Process noise standard deviation (motion uncertainty)
-            measurement_noise: Measurement noise standard deviation (sensor noise)
+            process_noise: Process noise std (motion uncertainty)
+            measurement_noise: Measurement noise std (GPS noise in meters)
         """
         self.dt = dt
 
@@ -92,17 +94,17 @@ class LinearKalmanFilter:
         ]) * q**2
 
         # =====================================================================
-        # Measurement matrix (Step 9): We measure position only
+        # Measurement matrix (Step 9): GPS measures position only
         # =====================================================================
-        # z = [x_measured, y_measured]
+        # z = [x_gps, y_gps]
         # H extracts position from the state vector
         self.H = np.array([
             [1, 0, 0, 0],
             [0, 1, 0, 0]
         ])
 
-        # Measurement noise covariance (sensor noise)
-        # Higher values = less trust in measurements
+        # Measurement noise covariance (GPS noise)
+        # Higher values = less trust in GPS measurements
         r = measurement_noise
         self.R = np.eye(2) * r**2
 
@@ -117,23 +119,18 @@ class LinearKalmanFilter:
         vy: float = 0.0,
         initial_uncertainty: float = 1.0,
     ):
-        """
-        Initialize the filter with a known state.
-
-        Args:
-            x, y: Initial position
-            vx, vy: Initial velocity
-            initial_uncertainty: Initial uncertainty (diagonal of P)
-        """
+        """Initialize the filter with a known state."""
         self.x = np.array([[x], [y], [vx], [vy]])
         self.P = np.eye(4) * initial_uncertainty
 
-    def predict(self, control_input: Optional[np.ndarray] = None):
+    def predict(self):
         """
         Prediction step: Estimate the next state based on motion model.
 
-        This step increases uncertainty because we're less sure about
+        This step INCREASES uncertainty because we're less sure about
         where the robot is after it moves.
+
+        Called on every odometry callback (~30 Hz).
 
         =====================================================================
         TODO (Step 7): Implement the predict step
@@ -142,24 +139,26 @@ class LinearKalmanFilter:
           1. State prediction:      x = F @ x
           2. Covariance prediction: P = F @ P @ F.T + Q
         """
-        # State prediction: x = F * x
+        # State prediction: x = F @ x
         # self.x = ???
 
-        # Covariance prediction: P = F * P * F^T + Q
+        # Covariance prediction: P = F @ P @ F.T + Q
         # self.P = ???
         pass
 
     def update(self, z_x: float, z_y: float):
         """
-        Update step: Correct the prediction using a measurement.
+        Update step: Correct the prediction using a GPS measurement.
 
-        This step decreases uncertainty because we get new information
+        This step DECREASES uncertainty because we get new information
         about where the robot actually is.
+
+        Called on every GPS callback (~1 Hz).
 
         =====================================================================
         TODO (Step 10): Implement the update step
         =====================================================================
-        Four equations:
+        Five equations:
           1. Innovation:            y = z - H @ x
           2. Innovation covariance: S = H @ P @ H.T + R
           3. Kalman gain:           K = P @ H.T @ inv(S)
@@ -167,8 +166,8 @@ class LinearKalmanFilter:
           5. Covariance update:     P = (I - K @ H) @ P
 
         Args:
-            z_x: Measured x position
-            z_y: Measured y position
+            z_x: GPS x position (meters, local frame)
+            z_y: GPS y position (meters, local frame)
         """
         # Measurement vector
         z = np.array([[z_x], [z_y]])
@@ -195,12 +194,7 @@ class LinearKalmanFilter:
         pass
 
     def get_state(self) -> Tuple[float, float, float, float]:
-        """
-        Get the current state estimate.
-
-        Returns:
-            Tuple of (x, y, vx, vy)
-        """
+        """Get current state estimate: (x, y, vx, vy)."""
         return (
             float(self.x[0, 0]),
             float(self.x[1, 0]),
@@ -208,34 +202,10 @@ class LinearKalmanFilter:
             float(self.x[3, 0]),
         )
 
-    def get_position(self) -> Tuple[float, float]:
-        """
-        Get just the position estimate.
-
-        Returns:
-            Tuple of (x, y)
-        """
-        return float(self.x[0, 0]), float(self.x[1, 0])
-
     def get_covariance(self) -> np.ndarray:
-        """
-        Get the state covariance matrix.
-
-        The diagonal elements represent the variance (uncertainty squared)
-        of each state variable.
-
-        Returns:
-            4x4 covariance matrix
-        """
+        """Get the 4x4 state covariance matrix."""
         return self.P.copy()
 
     def get_position_uncertainty(self) -> Tuple[float, float]:
-        """
-        Get the standard deviation of position estimates.
-
-        This can be used to draw uncertainty ellipses.
-
-        Returns:
-            Tuple of (sigma_x, sigma_y)
-        """
+        """Get position standard deviations: (sigma_x, sigma_y)."""
         return np.sqrt(self.P[0, 0]), np.sqrt(self.P[1, 1])

@@ -30,7 +30,10 @@ setup(
     entry_points={
         'console_scripts': [
             'kalman_node = kalman_filter.kalman_node:main',
+            'waypoint_driver = kalman_filter.waypoint_driver:main',
             'noisy_odom = kalman_filter.noisy_odom:main',
+            'ground_truth = kalman_filter.ground_truth:main',
+            'teleop_bridge = kalman_filter.teleop_bridge:main',
         ],
     },
 )
