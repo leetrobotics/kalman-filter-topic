@@ -67,6 +67,7 @@ def generate_launch_description():
     )
 
     # --- Spawn TurtleBot3 with GPS into the simulation ---
+    # Spawn position from nav2_gps_waypoint_follower_demo (z=0.33 to land on raceway surface)
     spawn_tb3 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
@@ -74,6 +75,11 @@ def generate_launch_description():
                 'launch', 'spawn_tb3_gps.launch.py'
             )
         ),
+        launch_arguments={
+            'x_pose': '2.0',
+            'y_pose': '-2.5',
+            'z_pose': '0.33',
+        }.items(),
     )
 
     # Bridge: Gazebo ground truth poses → ROS2
@@ -127,6 +133,7 @@ def generate_launch_description():
 
     # --- Gazebo WebSocket server (for browser-based sim viewer) ---
     # Delayed start to ensure gz sim is up before the websocket plugin connects
+    # GZ_VERBOSE=0 required to avoid segfault in gz-launch logger (thread-safety bug)
     gz_websocket = TimerAction(
         period=5.0,
         actions=[
@@ -134,6 +141,7 @@ def generate_launch_description():
                 cmd=['gz', 'launch', '/usr/share/gz/gz-launch7/configs/websocket.gzlaunch'],
                 name='gz_websocket',
                 output='screen',
+                additional_env={'GZ_VERBOSE': '0'},
             ),
         ],
     )
